@@ -23,9 +23,10 @@ static uint8_t rgb_send_cmd[21] = {
 //灯带实现的各种颜色
 static const uint8_t rgb_no_light[3]     = 	{0x00,0x00,0x00};
 static const uint8_t rgb_red_light[3]    =  {0xF0,0x00,0x00};
-static const uint8_t rgb_blue_light[3]   = 	{0x00,0x00,0xff};
-static const uint8_t rgb_green_light[3]  = 	{0x00,0xff,0x00};
-static const uint8_t rgb_yellow_light[3] = 	{0xff,0xff,0x00};
+static const uint8_t rgb_blue_light[3]   = 	{0x00,0x00,0xFF};
+static const uint8_t rgb_green_light[3]  = 	{0x00,0xFF,0x00};
+static const uint8_t rgb_yellow_light[3] = 	{0xFF,0xFF,0x00};
+static const uint8_t rgb_orange_light[3] = 	{0xFF,0x45,0x00};
 static const uint8_t rgb_color_light[3]  =  {0xFF,0xFF,0xFF};   //自定义颜色
 
 
@@ -308,9 +309,17 @@ static void U1_RX_IRQn(uint8_t ch)
             uint8_t exp_len = g_RS485.U1_RxBuf[2] + 5;
             uint16_t calc_crc, recv_crc;
 
+            if(exp_len > U1_RX_BUF_SIZE)      /* 防畸形报文：期望长度超出缓冲区上限 */
+            {                                 /* 若不拦截，RxCnt 永远达不到 exp_len，通信死锁 */
+                g_RS485.U1_Busy = 0;          /* 释放忙锁，允许下一帧重试 */
+                g_RS485.U1_RxCnt = 0;         /* 清接收计数，丢弃已收数据 */
+                g_RS485.U1_Err = 1;           /* 置错误标志，供 RS485_U1_Data_Print() 上报 */
+                return;
+            }
+
             if(g_RS485.U1_RxCnt >= exp_len)
             {
-                calc_crc = CRC16_Modbus(g_RS485.U1_RxBuf, exp_len - 2);
+                calc_crc = CRC16_Modbus((uint8_t*)g_RS485.U1_RxBuf, exp_len - 2);
                 recv_crc = (g_RS485.U1_RxBuf[g_RS485.U1_RxCnt - 2] << 8)
                             | g_RS485.U1_RxBuf[g_RS485.U1_RxCnt - 1];
 
@@ -518,6 +527,11 @@ void LED_Show_Green(void)
 void LED_Show_Yellow(void)
 {
     memcpy(&rgb_send_cmd[16], rgb_yellow_light, 3);
+    RS485_U2_SendArray(rgb_send_cmd, 21);   
+}
+void LED_Show_Orange(void)
+{
+    memcpy(&rgb_send_cmd[16], rgb_orange_light, 3);
     RS485_U2_SendArray(rgb_send_cmd, 21);   
 }
 void LED_Show_Color(void)

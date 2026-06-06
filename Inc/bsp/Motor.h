@@ -61,11 +61,11 @@ void Motor_SetARR(uint16_t speed);
 void Motor_SetCRR(uint16_t speed);
 void Motor_Speed(uint16_t Speed);
 void Motor_Pulse(FunctionalState val);
-void Motor_Init(Motor_t* Motor);
-void Motor_Start(Motor_t* Motor);
+void Motor_Init(volatile Motor_t* Motor);
+void Motor_Start(volatile Motor_t* Motor);
 void Motor_Stop(void);
 void Motor_Resume(void);
-void Motor_Change_Dir(Motor_t* Motor);
-void Motor_Check_State(Motor_t* Motor);
+void Motor_Change_Dir(volatile Motor_t* Motor);
+void Motor_Check_State(volatile Motor_t* Motor);
 
 #endif

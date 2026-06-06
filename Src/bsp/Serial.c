@@ -4,9 +4,6 @@ uint8_t USART3_RxBuffer[USART3_RX_BUFFER_SIZE];
 volatile uint16_t USART3_RxCount = 0;
 volatile uint16_t USART3_RxFinished = 0;
 
-/* 全局变量 */
-volatile uint8_t Serial_RxFlag;
-volatile uint8_t Serial_RxData;
 
 /*
 *************************************************************************************

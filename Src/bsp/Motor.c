@@ -193,7 +193,7 @@ void Motor_Pulse(FunctionalState val)
 *   描    述：读取限位开关确定初始方向，初始化PWM
 *************************************************************************************
 */
-void Motor_Init(Motor_t* Motor)
+void Motor_Init(volatile Motor_t* Motor)
 {
     if(LimSwc_ReadLeft())
         Motor->Motor_Dir = BACKWARD;
@@ -218,7 +218,7 @@ void Motor_Init(Motor_t* Motor)
 *   描    述：设置方向、使能、速度，使能脉冲输出
 *************************************************************************************
 */
-void Motor_Start(Motor_t* Motor)
+void Motor_Start(volatile Motor_t* Motor)
 {
     Motor_Dir(Motor->Motor_Dir);
     Motor_EN(Motor->Motor_En);
@@ -264,7 +264,7 @@ void Motor_Resume(void)
 *   描    述：FORWARD ↔ BACKWARD
 *************************************************************************************
 */
-void Motor_Change_Dir(Motor_t* Motor)
+void Motor_Change_Dir(volatile Motor_t* Motor)
 {
     if(Motor->Motor_Dir == FORWARD)
         Motor->Motor_Dir = BACKWARD;
@@ -281,7 +281,7 @@ void Motor_Change_Dir(Motor_t* Motor)
 *   描    述：上电寻原点 → 等待启动命令 → 定点运动(到中点停2秒)
 *************************************************************************************
 */
-void Motor_Check_State(Motor_t* Motor)
+void Motor_Check_State(volatile Motor_t* Motor)
 {
     uint8_t hit_right = LimSwc_ReadRight();
     uint8_t hit_left = LimSwc_ReadLeft();

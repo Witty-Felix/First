@@ -42,5 +42,6 @@ void    LED_Show_Red(void);
 void    LED_Show_Blue(void);
 void    LED_Show_Green(void);
 void    LED_Show_Yellow(void);
+void    LED_Show_Orange(void);
 void    LED_Show_Color(void);
 #endif

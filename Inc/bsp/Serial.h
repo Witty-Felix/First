@@ -10,9 +10,6 @@
 extern uint8_t USART3_RxBuffer[];
 extern volatile uint16_t USART3_RxFinished;
 
-extern volatile uint8_t Serial_RxFlag;
-extern volatile uint8_t Serial_RxData;
-
 void    Serial_Init(void);
 void    Serial_SendByte(uint8_t Data);
 void    Serial_SendArray(uint8_t* Array, uint16_t Length);

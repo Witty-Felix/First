@@ -47,6 +47,11 @@ int main(void)
                 printf("DIST = %d\n", RADAR_RX_DIST);
             }
 
+            // if(RADAR_RX_TEMP > 100)
+            // {
+            //     LED_Show_Orange();
+            // }
+
             Motor_Check_State(&Motor);
             
         }
