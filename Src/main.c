@@ -7,6 +7,8 @@
 #include "System.h"
 #include "Delay.h"
 
+uint16_t count;
+
 int main(void)
 {
     /* 系统初始化 */
@@ -21,33 +23,30 @@ int main(void)
     RS485_U1_Init(9600);
     RS485_U2_Init(9600);
 
-    Delay_ms(500);
-
     /* 应用启动 */
     g_RunState = HOME_INIT;
     // Motor_Start(&Motor);
     printf("Motor Starts!\n");
-
-    
+    LED_Show_Green();                    /* 初始状态：无障碍物 → 绿灯 */
 
     if(1)
     {
         while (1)
         {
-            /* 每200ms：轮询读雷达（数据在中断中滤波后存入全局变量） */
-            if(Timer_Poll_Flag == 1)
+            /* 10ms 一次采集数据 */
+            if(Timer_Poll_Flag == 10)
             {
-                Timer_Poll_Flag = 0;
+                Timer_Poll_Flag %= 10;  // 为10清零
+                count++;
                 RS485_U1_Poll();
             }
 
-            /* 每5s：打印滤波后的距离/温度 */
-            if(Timer_Print_Flag == 1)
+            if(count == 100)
             {
-                Timer_Print_Flag = 0;
-                RS485_U1_Data_Print();
+                count %= 100;
+                printf("DIST = %d\n", RADAR_RX_DIST);
             }
-            
+
             Motor_Check_State(&Motor);
             
         }

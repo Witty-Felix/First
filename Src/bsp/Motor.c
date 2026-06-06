@@ -4,12 +4,18 @@
 #include "System.h"
 
 /* 全局变量 */
-uint8_t Move_Stop;
-uint8_t Move_End;
-uint8_t Motor_Flag;
-Motor_t Motor;
-RunState g_RunState = HOME_INIT;
-uint32_t Hit_ms = 0;
+uint8_t          Move_Stop;
+uint8_t          Motor_Flag;
+volatile Motor_t Motor;
+RunState         g_RunState = HOME_INIT;
+static uint32_t  Stop_ms;
+volatile uint8_t Obstacle_Flag;
+static uint8_t   s_RecoverCnt;     /* 安全读数计数 */
+static uint32_t  s_ObstacleStart;  /* 障碍物触发时刻(Timer_ms)，用于暂停时序 */
+
+#define OBST_MAX_DIST        30   /* 急停距离阈值(mm)，小于此值触发急停 */
+#define START_OBST_MIN_DIST  50  /* 启动障碍物最小距离 */
+#define OBST_RECOVER_CNT     5    /* 需连续5次安全读数才解除急停 */
 
 /*
 *************************************************************************************
@@ -21,7 +27,7 @@ uint32_t Hit_ms = 0;
 *   描    述：配置为推挽输出，默认低电平
 *************************************************************************************
 */
-void Motor_DirEn_Init(void)
+static void Motor_DirEn_Init(void)
 {
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOE, ENABLE);
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE);
@@ -78,7 +84,7 @@ void Motor_EN(Motor_En_e val)
 *           ：初始化完不启动，需调用Motor_Pulse(ENABLE)
 *************************************************************************************
 */
-void Motor_PWM_Init(uint16_t arr, uint16_t psc)
+static void Motor_PWM_Init(uint16_t arr, uint16_t psc)
 {
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM5, ENABLE);
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);
@@ -196,8 +202,8 @@ void Motor_Init(Motor_t* Motor)
 
     Motor->Motor_En    = ENA;
     Motor->Pulse_Count = 0;
-    Motor->Pulse_Max   = 6400;
-    Motor->Speed       = 1000;
+    Motor->Pulse_Max   = 5650;
+    Motor->Speed       = 800;
 
     Motor_DirEn_Init();
     Motor_PWM_Init(7200, 10);
@@ -280,6 +286,64 @@ void Motor_Check_State(Motor_t* Motor)
     uint8_t hit_right = LimSwc_ReadRight();
     uint8_t hit_left = LimSwc_ReadLeft();
 
+    /*
+     *  ★ 有障碍物 → 禁止发数据、禁止运动，直接返回
+     *  （MID_STOP / MID_STOP2 / MID_STOP3 / BACK_STOP
+     *  中调用的
+     *  RS485_U1_Data_Print() 也不会被执行）
+    */
+    if(RADAR_RX_DIST <= OBST_MAX_DIST && RADAR_RX_DIST != 0)
+    {
+        if(!Obstacle_Flag)
+        {
+            Motor_Stop();
+            Obstacle_Flag    = 1;
+            s_RecoverCnt     = 0;
+            s_ObstacleStart  = Timer_ms;      /* 记录急停时刻，用于暂停时序 */
+            LED_Show_Red();
+            printf("DIST = %d\n", RADAR_RX_DIST);
+        }
+    }
+
+    /* 恢复检测 */
+    if(Obstacle_Flag == 1)
+    {
+        if(RADAR_RX_DIST >= START_OBST_MIN_DIST)  
+        {
+            s_RecoverCnt++;
+        }
+        else
+        {
+            s_RecoverCnt = 0;
+        }
+
+        if(s_RecoverCnt >= OBST_RECOVER_CNT)
+        {
+            /* 将阻塞时长补偿到 Stop_ms，实现"暂停时序"效果 */
+            Stop_ms += (Timer_ms - s_ObstacleStart);
+
+            /* 仅在电机正在运动中才恢复脉冲输出 */
+            if(g_RunState == HOME_CHECK || g_RunState == WAIT_HIT ||
+               g_RunState == GO_END   || g_RunState == BACK_MID ||
+               g_RunState == GO_BACK)
+            {
+                Motor_Resume();
+                LED_Show_Green();
+            }
+            else
+            {
+                LED_Show_Yellow();   /* 暂停态恢复 → 黄灯(继续采集) */
+            }
+
+            Obstacle_Flag = 0;
+            s_RecoverCnt  = 0;
+            printf("DIST = %d\n", RADAR_RX_DIST);
+        }
+    }
+
+    if(Obstacle_Flag == 1)
+        return;
+
     switch(g_RunState)
     {
         /*=========== 上电寻原点 ===========*/
@@ -324,69 +388,96 @@ void Motor_Check_State(Motor_t* Motor)
             g_RunState = WAIT_HIT;
             break;
 
-        /* ----- ② 监控是否到达中点(3200) ----- */
+        /* ----- ② 监控是否到达中点(2828) ----- */
         case WAIT_HIT:
-            if(Motor->Pulse_Count >= 3200)
+            if(Motor->Pulse_Count >= 2828)
             {
                 Motor_Stop();
+                LED_Show_Yellow();           /* 到中点暂停 → 黄灯(采集数据) */
                 g_RunState = MID_STOP;
+                Stop_ms = Timer_ms;
             }
             break;
 
         /* ----- ③ 在中点停2秒 → 继续前往终点(6400) ----- */
         case MID_STOP:
-            Delay_ms(2000);
-            Motor->Motor_Dir = FORWARD;
-            Motor_Start(Motor);
-            g_RunState = GO_END;
+            if((Timer_ms - Stop_ms) > 2000)
+            {
+                RS485_U1_Data_Print();
+                LED_Show_Green();            /* 继续前进 → 绿灯 */
+                Motor->Motor_Dir = FORWARD;
+                Motor_Start(Motor);
+                g_RunState = GO_END;
+            }
             break;
 
-        /* ----- ④ 监控是否到达终点(6400) ----- */
+        /* ----- ④ 监控是否到达终点(5650) ----- */
         case GO_END:
-            if(Motor->Pulse_Count >= 6400 || hit_left)
+            if(Motor->Pulse_Count >= 5650 || hit_left)
             {
                 Motor_Stop();
+                LED_Show_Yellow();           /* 到终点暂停 → 黄灯(采集数据) */
                 g_RunState = MID_STOP2;
+                Stop_ms = Timer_ms;
+                printf("pulse_count = %d\n", Motor->Pulse_Count);
             }
             break;
 
-        /* ----- ⑤ 在终点停2秒 → 返回起点 ----- */
+        /* ----- ⑤ 在终点停2秒 → 返回中点 ----- */
         case MID_STOP2:
-            Delay_ms(2000);
-            Motor->Motor_Dir = BACKWARD;
-            Motor_Start(Motor);
-            g_RunState = BACK_MID;
+            if((Timer_ms - Stop_ms) > 2000)
+            {
+                RS485_U1_Data_Print();
+                LED_Show_Green();            /* 返回中点 → 绿灯 */
+                Motor->Motor_Dir = BACKWARD;
+                Motor_Start(Motor);
+                g_RunState = BACK_MID;
+            }
             break;
 
+        /* ----- ⑥ 监控是否到达中点(2828) ----- */
         case BACK_MID:
-            if(Motor->Pulse_Count <= 3200)
+            if(Motor->Pulse_Count <= 2828)
             {
                 Motor_Stop();
+                LED_Show_Yellow();           /* 回到中点暂停 → 黄灯(采集数据) */
                 g_RunState = MID_STOP3;
+                Stop_ms = Timer_ms;
             }
             break;
 
+        /* ----- ⑦ 在中点停2秒 → 返回起点 ----- */
         case MID_STOP3:
-            Delay_ms(2000);
-            Motor->Motor_Dir = BACKWARD;
-            Motor_Start(Motor);
-            g_RunState = GO_BACK;
+            if((Timer_ms - Stop_ms) > 2000)
+            {
+                RS485_U1_Data_Print();
+                LED_Show_Green();            /* 返回起点 → 绿灯 */
+                Motor->Motor_Dir = BACKWARD;
+                Motor_Start(Motor);
+                g_RunState = GO_BACK;
+            }
             break;
 
-        /* ----- ⑥ 监控是否回到起点(0) ----- */
+        /* ----- ⑧ 监控是否回到起点(0) ----- */
         case GO_BACK:
-            if(Motor->Pulse_Count <= 10 || hit_right)
+            if(Motor->Pulse_Count == 0 || hit_right)
             {
                 Motor_Stop();
                 Motor->Pulse_Count = 0;
+                LED_Show_Yellow();           /* 回到起点暂停 → 黄灯(采集数据) */
                 g_RunState = BACK_STOP;
+                Stop_ms = Timer_ms;
             }
             break;
 
-        /* ----- ⑦ 回到起点停2秒 → 循环再去中点 ----- */
+        /* ----- ⑨ 回到起点停2秒 → 循环再去中点 ----- */
         case BACK_STOP:
-            Delay_ms(2000);
-            g_RunState = GO_MID;              /* 循环：再去中点 */
+            if((Timer_ms - Stop_ms) > 2000)
+            {
+                RS485_U1_Data_Print();
+                LED_Show_Green();
+                g_RunState = GO_MID;              /* 循环：再去中点 */
+            }
             break;
     }
 }
